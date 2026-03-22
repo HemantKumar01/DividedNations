@@ -1,5 +1,6 @@
-const { loadAllAgents, generateWithGemini, getDramaMessage, generateEscalation } = require('./agentEngine');
+const { loadAllAgents, generateWithGemini, getDramaMessage, generateEscalation, pickSmartSpeakerWithGemini } = require('./agentEngine');
 const { getRandomTopic, getRandomHeadline } = require('./newsService');
+const { saveMessage, loadRecentMessages } = require('./db');
 
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const FORCE_SCRIPTED = process.env.FORCE_SCRIPTED === 'true';
@@ -35,10 +36,29 @@ class DebateController {
     this.lastSpeaker = null;
     this.recentSpeakers = [];
     this.typingCountry = null;
+    this.agentMemory = {}; // Stores grudges
 
     for (const key of this.agentKeys) {
       this.usedDramaIndices[key] = new Set();
+      this.agentMemory[key] = [];
     }
+
+    this.initDB();
+  }
+
+  async initDB() {
+    const historical = await loadRecentMessages(20);
+    if (historical && historical.length > 0) {
+      this.messageHistory = historical;
+      this.lastSpeaker = historical[historical.length - 1].country;
+      this.recentSpeakers = historical.slice(-5).map(m => m.country);
+    }
+  }
+
+  pushMessageLog(msg) {
+    this.messageHistory.push(msg);
+    if (this.messageHistory.length > 20) this.messageHistory.shift();
+    saveMessage(msg);
   }
 
   start() {
@@ -56,15 +76,15 @@ class DebateController {
     this.clearTyping();
   }
 
-  scheduleNext() {
+  async scheduleNext() {
     if (!this.debateActive) return;
     const delay = randomDelay(this.chaosLevel);
 
     // Show typing indicator partway through the delay
     const typingDelay = delay * (0.3 + Math.random() * 0.35);
-    setTimeout(() => {
+    setTimeout(async () => {
       if (!this.debateActive) return;
-      const nextSpeaker = this.pickNextSpeaker(this.lastSpeaker);
+      const nextSpeaker = await this.pickNextSpeaker(this.lastSpeaker);
       this.showTyping(nextSpeaker);
     }, typingDelay);
 
@@ -77,7 +97,7 @@ class DebateController {
   showTyping(country) {
     this.typingCountry = country;
     const agent = this.agents[country];
-    this.io.emit('typing', {
+    this.io.volatile.emit('typing', {
       country,
       flag: agent ? agent.flag : '🌍',
       ambassadorName: agent ? agent.ambassadorName : country
@@ -86,13 +106,21 @@ class DebateController {
 
   clearTyping() {
     if (this.typingCountry) {
-      this.io.emit('typing-stop', { country: this.typingCountry });
+      this.io.volatile.emit('typing-stop', { country: this.typingCountry });
       this.typingCountry = null;
     }
   }
 
-  pickNextSpeaker(respondingTo = null) {
+  async pickNextSpeaker(respondingTo = null) {
+    const useGemini = GEMINI_API_KEY && GEMINI_API_KEY !== 'your_key_here' && !FORCE_SCRIPTED;
     let candidates = [...this.agentKeys];
+    
+    // 30% chance or high chaos to use Gemini for smart speaking
+    if (useGemini && (this.chaosLevel >= 6 || Math.random() < 0.3)) {
+      const picked = await pickSmartSpeakerWithGemini(this.messageHistory, this.currentTopic, GEMINI_API_KEY, candidates);
+      if (picked && picked !== this.lastSpeaker) return picked;
+    }
+
     if (respondingTo) {
       const beefMap = {
         USA: ['China', 'Russia'], China: ['USA', 'India'], Russia: ['USA', 'UK'],
@@ -132,26 +160,42 @@ class DebateController {
     const useGemini = GEMINI_API_KEY && GEMINI_API_KEY !== 'your_key_here' && !FORCE_SCRIPTED;
 
     let text;
+    let emotion = 'neutral';
+    
+    // Compile memory string
+    const memoryStr = this.agentMemory[agentKey].length > 0 ? this.agentMemory[agentKey].join('\n') : null;
+
     if (useGemini) {
       const generated = await generateWithGemini(
-        agent, this.messageHistory, this.currentTopic, GEMINI_API_KEY, this.agentKeys
+        agent, this.messageHistory, this.currentTopic, GEMINI_API_KEY, this.agentKeys, memoryStr
       );
-      text = generated || getDramaMessage(agent, this.usedDramaIndices[agentKey], this.currentTopic);
+      if (generated) {
+        text = generated.text;
+        emotion = generated.emotion;
+      } else {
+        text = getDramaMessage(agent, this.usedDramaIndices[agentKey], this.currentTopic);
+      }
     } else {
       text = getDramaMessage(agent, this.usedDramaIndices[agentKey], this.currentTopic);
     }
-    return text;
+    return { text, emotion };
   }
 
   async executeTurn() {
-    const speakerKey = this.pickNextSpeaker(this.lastSpeaker);
+    const speakerKey = await this.pickNextSpeaker(this.lastSpeaker);
     const agent = this.agents[speakerKey];
 
     this.clearTyping();
 
-    const text = await this.generateMessage(speakerKey);
+    const { text, emotion } = await this.generateMessage(speakerKey);
     const msgId = `msg_${Date.now()}_${speakerKey}`;
     const replyTarget = this.pickReplyTarget(speakerKey);
+
+    // Build grudges safely
+    if (replyTarget && this.agentMemory[replyTarget.country]) {
+      this.agentMemory[replyTarget.country].push(`${speakerKey} recently attacked you saying: "${text}"`);
+      if (this.agentMemory[replyTarget.country].length > 3) this.agentMemory[replyTarget.country].shift();
+    }
 
     const message = {
       id: msgId,
@@ -159,6 +203,7 @@ class DebateController {
       ambassadorName: agent.ambassadorName,
       flag: agent.flag,
       text,
+      emotion,
       timestamp: Date.now(),
       chaosLevel: this.chaosLevel,
       replyTo: replyTarget ? {
@@ -169,8 +214,7 @@ class DebateController {
       } : null
     };
 
-    this.messageHistory.push({ id: msgId, country: speakerKey, flag: agent.flag, ambassadorName: agent.ambassadorName, text });
-    if (this.messageHistory.length > 20) this.messageHistory.shift();
+    this.pushMessageLog(message);
 
     this.lastSpeaker = speakerKey;
     this.recentSpeakers.push(speakerKey);
@@ -180,7 +224,7 @@ class DebateController {
 
     if (Math.random() < 0.15) {
       this.chaosLevel = Math.min(10, this.chaosLevel + 1);
-      this.io.emit('chaos-update', { chaosLevel: this.chaosLevel });
+      this.io.volatile.emit('chaos-update', { chaosLevel: this.chaosLevel });
     }
 
     setTimeout(() => this.triggerReactions(msgId, speakerKey), 600 + Math.random() * 700);
@@ -204,7 +248,7 @@ class DebateController {
           ? agent.emojis[Math.floor(Math.random() * agent.emojis.length)]
           : REACTION_POOL[Math.floor(Math.random() * REACTION_POOL.length)];
 
-        this.io.emit('reaction', {
+        this.io.volatile.emit('reaction', {
           messageId: msgId,
           country: reactorKey,
           flag: agent.flag,
@@ -217,7 +261,7 @@ class DebateController {
 
   async triggerAction(actionType, targetCountry = null) {
     this.chaosLevel = Math.min(10, this.chaosLevel + 2);
-    this.io.emit('chaos-update', { chaosLevel: this.chaosLevel });
+    this.io.volatile.emit('chaos-update', { chaosLevel: this.chaosLevel });
 
     switch (actionType) {
       case 'MIC_LEAK': {
@@ -246,13 +290,13 @@ class DebateController {
         const text1 = generateEscalation(agent1, 'HOT_MIC');
         const escId = `esc_${Date.now()}`;
         this.io.emit('escalation', { type: 'HOT_MIC', label: '🔥 HOT MIC CAUGHT', country: agents[0], flag: agent1.flag, ambassadorName: agent1.ambassadorName, text: text1, msgId: escId, target: agents[1], timestamp: Date.now() });
-        this.messageHistory.push({ id: escId, country: agents[0], flag: agent1.flag, ambassadorName: agent1.ambassadorName, text: text1 });
+        this.pushMessageLog({ id: escId, country: agents[0], flag: agent1.flag, ambassadorName: agent1.ambassadorName, text: text1, timestamp: Date.now() });
         setTimeout(async () => {
           const agent2 = this.agents[agents[1]];
-          const reactText = await this.generateMessage(agents[1]);
+          const { text: reactText, emotion } = await this.generateMessage(agents[1]);
           const replyMsgId = `msg_${Date.now()}`;
-          this.io.emit('message', { id: replyMsgId, country: agents[1], ambassadorName: agent2.ambassadorName, flag: agent2.flag, text: `❗ ${reactText}`, timestamp: Date.now(), replyTo: { id: escId, country: agents[0], flag: agent1.flag, text: text1.substring(0, 80) }, isFired: true });
-          this.messageHistory.push({ id: replyMsgId, country: agents[1], flag: agent2.flag, ambassadorName: agent2.ambassadorName, text: reactText });
+          this.io.emit('message', { id: replyMsgId, country: agents[1], ambassadorName: agent2.ambassadorName, flag: agent2.flag, text: `❗ ${reactText}`, emotion, timestamp: Date.now(), replyTo: { id: escId, country: agents[0], flag: agent1.flag, text: text1.substring(0, 80) }, isFired: true });
+          this.pushMessageLog({ id: replyMsgId, country: agents[1], flag: agent2.flag, ambassadorName: agent2.ambassadorName, text: reactText, timestamp: Date.now() });
         }, 2200);
         break;
       }
@@ -263,7 +307,7 @@ class DebateController {
           setTimeout(async () => {
             const agent = this.agents[agentKey];
             const vote = Math.random() < 0.5 ? '✅ IN FAVOUR' : '❌ AGAINST';
-            const text = await this.generateMessage(agentKey);
+            const { text, emotion } = await this.generateMessage(agentKey);
             this.io.emit('vote', { country: agentKey, flag: agent.flag, ambassadorName: agent.ambassadorName, vote, reason: text.substring(0, 100) + (text.length > 100 ? '...' : ''), timestamp: Date.now() });
           }, delay);
           delay += 500 + Math.random() * 400;
@@ -278,14 +322,14 @@ class DebateController {
         const threatText = `${senderAgent.flag} ${sender} has formally threatened ${targetAgent.flag} ${target} with economic sanctions unless immediate action is taken.`;
         const escId = `esc_${Date.now()}`;
         this.io.emit('escalation', { type: 'SANCTIONS_THREAT', label: '💰 SANCTIONS THREAT', country: sender, flag: senderAgent.flag, ambassadorName: senderAgent.ambassadorName, text: threatText, msgId: escId, target, timestamp: Date.now() });
-        this.messageHistory.push({ id: escId, country: sender, flag: senderAgent.flag, ambassadorName: senderAgent.ambassadorName, text: threatText });
+        this.pushMessageLog({ id: escId, country: sender, flag: senderAgent.flag, ambassadorName: senderAgent.ambassadorName, text: threatText, timestamp: Date.now() });
         this.chaosLevel = Math.min(10, this.chaosLevel + 3);
-        this.io.emit('chaos-update', { chaosLevel: this.chaosLevel });
+        this.io.volatile.emit('chaos-update', { chaosLevel: this.chaosLevel });
         setTimeout(async () => {
-          const text = await this.generateMessage(target);
+          const { text, emotion } = await this.generateMessage(target);
           const replyId = `msg_${Date.now()}`;
-          this.io.emit('message', { id: replyId, country: target, ambassadorName: targetAgent.ambassadorName, flag: targetAgent.flag, text: `⚡ ${text}`, timestamp: Date.now(), replyTo: { id: escId, country: sender, flag: senderAgent.flag, text: threatText.substring(0, 80) }, isFired: true });
-          this.messageHistory.push({ id: replyId, country: target, flag: targetAgent.flag, ambassadorName: targetAgent.ambassadorName, text });
+          this.io.emit('message', { id: replyId, country: target, ambassadorName: targetAgent.ambassadorName, flag: targetAgent.flag, text: `⚡ ${text}`, emotion, timestamp: Date.now(), replyTo: { id: escId, country: sender, flag: senderAgent.flag, text: threatText.substring(0, 80) }, isFired: true });
+          this.pushMessageLog({ id: replyId, country: target, flag: targetAgent.flag, ambassadorName: targetAgent.ambassadorName, text, timestamp: Date.now() });
         }, 2000);
         break;
       }
@@ -303,16 +347,15 @@ class DebateController {
         this.showTyping(agentKey);
         await new Promise(r => setTimeout(r, 1200 + Math.random() * 800));
         this.clearTyping();
-        const text = await this.generateMessage(agentKey);
+        const { text, emotion } = await this.generateMessage(agentKey);
         const rid = `msg_${Date.now()}_${agentKey}`;
         const replyTarget = this.pickReplyTarget(agentKey);
         this.io.emit('message', {
           id: rid, country: agentKey, ambassadorName: agent.ambassadorName, flag: agent.flag,
-          text, timestamp: Date.now(), isFired: true,
+          text, emotion, timestamp: Date.now(), isFired: true,
           replyTo: replyTarget ? { id: replyTarget.id, country: replyTarget.country, flag: replyTarget.flag, text: replyTarget.text.substring(0, 80) } : null
         });
-        this.messageHistory.push({ id: rid, country: agentKey, flag: agent.flag, ambassadorName: agent.ambassadorName, text });
-        if (this.messageHistory.length > 20) this.messageHistory.shift();
+        this.pushMessageLog({ id: rid, country: agentKey, flag: agent.flag, ambassadorName: agent.ambassadorName, text, timestamp: Date.now() });
         setTimeout(() => this.triggerReactions(rid, agentKey), 700);
       }, d);
       delay += 1600 + Math.random() * 800;
@@ -331,7 +374,8 @@ class DebateController {
       topic: this.currentTopic,
       chaosLevel: this.chaosLevel,
       agents: Object.entries(this.agents).map(([k, v]) => ({ country: k, flag: v.flag, ambassadorName: v.ambassadorName, emojis: v.emojis })),
-      active: this.debateActive
+      active: this.debateActive,
+      messageHistory: this.messageHistory
     };
   }
 }

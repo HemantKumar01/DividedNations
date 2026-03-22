@@ -44,14 +44,16 @@ const RSS_FEEDS = [
 
 let cachedHeadlines = [...FAKE_HEADLINES];
 let lastFetchTime = 0;
+const seenTitles = new Set();
 
 async function fetchLiveHeadlines() {
   const now = Date.now();
   if (now - lastFetchTime < 60000) {
-    return cachedHeadlines;
+    return { headlines: cachedHeadlines, newItems: [] };
   }
   
   const liveHeadlines = [];
+  const newItems = [];
   
   for (const feedUrl of RSS_FEEDS) {
     try {
@@ -60,6 +62,10 @@ async function fetchLiveHeadlines() {
       for (const item of items) {
         if (item.title) {
           liveHeadlines.push(item.title);
+          if (!seenTitles.has(item.title)) {
+            newItems.push({ title: item.title, snippet: item.contentSnippet || item.content || '' });
+            seenTitles.add(item.title);
+          }
         }
       }
     } catch (err) {
@@ -80,7 +86,7 @@ async function fetchLiveHeadlines() {
   }
   
   lastFetchTime = now;
-  return cachedHeadlines;
+  return { headlines: cachedHeadlines, newItems };
 }
 
 function getRandomHeadline(exclude = null) {
@@ -117,6 +123,9 @@ const DEBATE_TOPICS = [
 ];
 
 function getRandomTopic() {
+  if (cachedHeadlines && cachedHeadlines.length > 0) {
+    return getRandomHeadline();
+  }
   return DEBATE_TOPICS[Math.floor(Math.random() * DEBATE_TOPICS.length)];
 }
 

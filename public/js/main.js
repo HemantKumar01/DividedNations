@@ -22,6 +22,14 @@
       ChatModule.populateDelegates(state.agents);
     }
     
+    // Load pre-existing chat history if any
+    if (state.messageHistory && state.messageHistory.length > 0) {
+      document.getElementById('chatContainer').innerHTML = '';
+      state.messageHistory.forEach(msg => {
+        ChatModule.renderMessage(msg);
+      });
+    }
+    
     // Set topic
     if (state.topic) {
       currentTopic = state.topic;
@@ -67,6 +75,9 @@
   // New message from a bot
   socket.on('message', (msg) => {
     ChatModule.renderMessage(msg);
+    if (window.MapModule && window.getCountryColor) {
+      window.MapModule.highlightCountry(msg.country, getCountryColor(msg.country));
+    }
   });
 
   // Emoji reaction to a message
@@ -128,6 +139,9 @@
       ControlsModule.showVoteOverlay(currentTopic);
     }
     ChatModule.renderVoteRow(vote);
+    if (window.MapModule) {
+      window.MapModule.votePulse(vote.country, vote.vote.includes('FAVOUR'));
+    }
   });
 
   // Initialize controls with socket reference
