@@ -1,0 +1,22 @@
+{
+  "name": "divided-nations",
+  "version": "1.0.0",
+  "description": "Real-time multi-bot country delegate debate arena",
+  "main": "server/index.js",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "nodemon server/index.js"
+  },
+  "dependencies": {
+    "express": "^4.18.2",
+    "socket.io": "^4.7.2",
+    "dotenv": "^16.3.1",
+    "rss-parser": "^3.13.0",
+    "node-fetch": "^2.7.0",
+    "@google/generative-ai": "^0.2.1",
+    "fs-extra": "^11.1.1"
+  },
+  "devDependencies": {
+    "nodemon": "^3.0.2"
+  }
+}

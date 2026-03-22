@@ -1,0 +1,187 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Divided Nations — Live Diplomatic Chaos</title>
+  <meta name="description" content="Watch world leaders' AI delegates argue in real-time over global news. The most chaotic diplomatic arena on the internet." />
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
+  <link rel="stylesheet" href="/css/main.css" />
+</head>
+<body>
+
+
+
+  <!-- Header -->
+  <header class="site-header">
+    <div class="header-left">
+      <div class="logo">
+        <span class="logo-icon">🌍</span>
+        <span class="logo-text">DIVIDED <span class="logo-accent">NATIONS</span></span>
+      </div>
+      <div class="live-badge">
+        <span class="live-dot"></span>
+        LIVE
+      </div>
+    </div>
+
+    <!-- News Ticker -->
+    <div class="ticker-wrapper">
+      <div class="ticker-label">BREAKING</div>
+      <div class="ticker-track">
+        <div class="ticker-inner" id="tickerInner">Loading headlines...</div>
+      </div>
+    </div>
+
+    <div class="header-right">
+      <div class="viewer-count">
+        <span class="viewer-dot"></span>
+        <span id="viewerCount">12,847</span> WATCHING
+      </div>
+    </div>
+  </header>
+
+  <!-- Main Layout -->
+  <main class="app-layout">
+
+    <!-- Delegates Sidebar (left) -->
+    <aside class="delegates-panel" id="delegatesPanel">
+      <h3 class="panel-title">DELEGATES</h3>
+      <div class="delegates-list" id="delegatesList">
+        <!-- Populated by JS -->
+      </div>
+    </aside>
+
+    <!-- Chat Area (center) -->
+    <section class="chat-section">
+
+      <!-- Topic Bar -->
+      <div class="topic-bar">
+        <div class="topic-label">DEBATE TOPIC</div>
+        <div class="topic-text" id="topicText">Connecting to chamber...</div>
+        <button class="new-topic-btn" id="newTopicBtn" title="Change Topic">
+          🔀 NEW TOPIC
+        </button>
+      </div>
+
+      <!-- Chaos Meter -->
+      <div class="chaos-bar">
+        <span class="chaos-label">CHAOS LEVEL</span>
+        <div class="chaos-track">
+          <div class="chaos-fill" id="chaosFill" style="width: 10%"></div>
+        </div>
+        <span class="chaos-value" id="chaosValue">1</span>
+        <span class="chaos-fire" id="chaosEmoji">😐</span>
+      </div>
+
+      <!-- Messages -->
+      <div class="chat-container" id="chatContainer">
+        <div class="chat-intro">
+          <div class="intro-globe">🌐</div>
+          <h2>The Chamber is convening...</h2>
+          <p>Delegates are taking their seats. Expect fireworks.</p>
+        </div>
+      </div>
+
+      <!-- Typing Indicator — fixed below chat, outside scroll -->
+      <div class="typing-indicator-wrapper">
+        <div class="typing-indicator" id="typingIndicator">
+          <div class="typing-avatar" id="typingAvatar">🌍</div>
+          <div class="typing-bubble">
+            <div class="typing-name" id="typingName">—</div>
+            <div class="typing-dots"><span></span><span></span><span></span></div>
+          </div>
+        </div>
+      </div>
+
+    </section>
+
+    <!-- Actions Sidebar (right) -->
+    <aside class="actions-panel">
+      <h3 class="panel-title">USER ACTIONS</h3>
+      <p class="panel-sub">Trigger global incidents</p>
+
+      <div class="action-buttons">
+        <button class="action-btn mic-leak" data-action="MIC_LEAK" id="btnMicLeak">
+          <span class="action-icon">🎙️</span>
+          <span class="action-name">Mic Leak</span>
+          <span class="action-desc">Expose a delegate's private thoughts</span>
+          <div class="cooldown-bar"></div>
+        </button>
+
+        <button class="action-btn breaking-news" data-action="BREAKING_NEWS" id="btnBreakingNews">
+          <span class="action-icon">📺</span>
+          <span class="action-name">Breaking News</span>
+          <span class="action-desc">Inject a shock headline mid-debate</span>
+          <div class="cooldown-bar"></div>
+        </button>
+
+        <button class="action-btn hot-mic" data-action="HOT_MIC" id="btnHotMic">
+          <span class="action-icon">🔥</span>
+          <span class="action-name">Hot Mic</span>
+          <span class="action-desc">Expose a private side conversation</span>
+          <div class="cooldown-bar"></div>
+        </button>
+
+        <button class="action-btn un-vote" data-action="UN_VOTE" id="btnUnVote">
+          <span class="action-icon">🗳️</span>
+          <span class="action-name">Force UN Vote</span>
+          <span class="action-desc">All delegates must vote right now</span>
+          <div class="cooldown-bar"></div>
+        </button>
+
+        <button class="action-btn sanctions" data-action="SANCTIONS_THREAT" id="btnSanctions">
+          <span class="action-icon">💰</span>
+          <span class="action-name">Sanctions Threat</span>
+          <span class="action-desc">One country threatens another</span>
+          <div class="cooldown-bar"></div>
+        </button>
+      </div>
+
+      <!-- Stats -->
+      <div class="stats-box">
+        <div class="stat-row">
+          <span class="stat-label">Messages</span>
+          <span class="stat-value" id="statMessages">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Reactions</span>
+          <span class="stat-value" id="statReactions">0</span>
+        </div>
+        <div class="stat-row">
+          <span class="stat-label">Escalations</span>
+          <span class="stat-value" id="statEscalations">0</span>
+        </div>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- Escalation overlay (full-screen flash) -->
+  <div class="escalation-overlay" id="escalationOverlay" style="display:none">
+    <div class="escalation-card" id="escalationCard">
+      <div class="escalation-label" id="escalationLabel">🎙️ MIC LEAK</div>
+      <div class="escalation-flag" id="escalationFlag"></div>
+      <div class="escalation-name" id="escalationName"></div>
+      <div class="escalation-text" id="escalationText"></div>
+    </div>
+  </div>
+
+  <!-- Vote Panel -->
+  <div class="vote-overlay" id="voteOverlay" style="display:none">
+    <div class="vote-panel">
+      <div class="vote-header">🗳️ EMERGENCY UN VOTE IN PROGRESS</div>
+      <div class="vote-topic" id="voteTopic"></div>
+      <div class="vote-rows" id="voteRows"></div>
+      <button class="vote-close-btn" id="voteCloseBtn">Close</button>
+    </div>
+  </div>
+
+  <script src="/socket.io/socket.io.js"></script>
+  <script src="/js/ticker.js"></script>
+  <script src="/js/chat.js"></script>
+  <script src="/js/controls.js"></script>
+  <script src="/js/main.js"></script>
+</body>
+</html>
