@@ -5,6 +5,7 @@ const { Server } = require('socket.io');
 const path = require('path');
 const { fetchLiveHeadlines, getAllHeadlines, getRandomTopic } = require('./newsService');
 const DebateController = require('./debateController');
+const { generateGeopoliticalInsight } = require('./insightGenerator');
 
 const app = express();
 const server = http.createServer(app);
@@ -87,10 +88,31 @@ io.on('connection', (socket) => {
 async function startNewsRefresh() {
   await fetchLiveHeadlines();
   setInterval(async () => {
-    await fetchLiveHeadlines();
-    const headlines = getAllHeadlines();
+    const { headlines, newItems } = await fetchLiveHeadlines();
     io.emit('headlines', { headlines });
-    console.log('[Server] Headlines refreshed');
+    console.log('[Server] Headlines refreshed', newItems && newItems.length > 0 ? `(${newItems.length} new items)` : '');
+    
+    if (newItems && newItems.length > 0) {
+      const targetNews = newItems[0];
+      const insight = await generateGeopoliticalInsight(
+         targetNews.title, targetNews.snippet, debate.messageHistory, process.env.GEMINI_API_KEY
+      );
+      if (insight) {
+        const msgId = `insight_${Date.now()}`;
+        const msg = {
+           id: msgId,
+           country: 'System',
+           ambassadorName: 'AI Analyst',
+           flag: '🤖',
+           text: insight,
+           emotion: 'neutral',
+           timestamp: Date.now()
+        };
+        debate.pushMessageLog(msg);
+        io.emit('message', msg);
+        io.emit('escalation', { type: 'BREAKING_NEWS', label: '🧠 AI ANALYST INSIGHT', text: `Re: ${targetNews.title}`, timestamp: Date.now() });
+      }
+    }
   }, 60000);
 }
 

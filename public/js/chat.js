@@ -63,8 +63,23 @@ function renderMessage(msg) {
       </div>`;
   }
 
+  let emotionEmoji = '';
+  if (msg.emotion) {
+    switch (msg.emotion) {
+      case 'angry': emotionEmoji = '💢'; break;
+      case 'smug': emotionEmoji = '😏'; break;
+      case 'panicked': emotionEmoji = '😨'; break;
+      case 'laughing': emotionEmoji = '😂'; break;
+      case 'neutral': emotionEmoji = '😐'; break;
+      default: emotionEmoji = '💬'; break;
+    }
+  }
+
   card.innerHTML = `
-    <div class="msg-avatar">${escapeHtml(msg.flag)}</div>
+    <div class="msg-avatar-wrapper" style="position:relative; display:inline-block;">
+      <div class="msg-avatar">${escapeHtml(msg.flag)}</div>
+      ${emotionEmoji ? `<div class="msg-emotion" style="position:absolute; bottom:-4px; right:-4px; font-size:12px; background:#222b31; padding:2px; border-radius:50%; line-height:1;">${emotionEmoji}</div>` : ''}
+    </div>
     <div class="msg-body${msg.isEscalation ? ' escalation-body' : ''}">
       <div class="msg-country-name" style="color:${color}">
         ${escapeHtml(msg.ambassadorName)}

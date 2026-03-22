@@ -8,9 +8,9 @@
   <link rel="preconnect" href="https://fonts.googleapis.com" />
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800;900&family=Space+Grotesk:wght@400;500;600;700&display=swap" rel="stylesheet" />
   <link rel="stylesheet" href="/css/main.css" />
+  <script src="https://d3js.org/d3.v7.min.js"></script>
 </head>
 <body>
-
 
 
   <!-- Header -->
@@ -55,6 +55,9 @@
 
     <!-- Chat Area (center) -->
     <section class="chat-section">
+
+      <!-- World Map Background (scoped to chat area) -->
+      <div id="map-container" style="position:absolute; top:0; left:0; width:100%; height:100%; z-index:0; opacity: 0.6; pointer-events: none;"></div>
 
       <!-- Topic Bar -->
       <div class="topic-bar">
@@ -182,6 +185,7 @@
   <script src="/js/ticker.js"></script>
   <script src="/js/chat.js"></script>
   <script src="/js/controls.js"></script>
+  <script src="/js/map.js"></script>
   <script src="/js/main.js"></script>
 </body>
 </html>

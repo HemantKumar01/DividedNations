@@ -4,32 +4,32 @@ const path = require('path');
 // Parse agent markdown files
 function parseAgentMarkdown(content, filename) {
   const country = filename.replace('.md', '');
-  
+
   // Extract flag emoji
   const flagMatch = content.match(/\*\*Flag\*\*:\s*([^\n]+)/);
   const flag = flagMatch ? flagMatch[1].trim() : '🌍';
-  
+
   // Extract emoji reactions
   const emojiMatch = content.match(/\*\*Emoji Reactions\*\*:\s*([^\n]+)/);
   const emojiStr = emojiMatch ? emojiMatch[1].trim() : '😐';
   const emojis = emojiStr.split(/\s+/).filter(e => e.length > 0);
-  
+
   // Extract voice style
   const voiceMatch = content.match(/\*\*Voice Style\*\*:\s*([^\n]+)/);
   const voiceStyle = voiceMatch ? voiceMatch[1].trim() : '';
-  
+
   // Extract persona paragraph
   const personaMatch = content.match(/## Persona\n([\s\S]*?)(?=\n##)/);
   const persona = personaMatch ? personaMatch[1].trim() : '';
-  
+
   // Extract speaking style
   const speakingMatch = content.match(/## Speaking Style\n([\s\S]*?)(?=\n##)/);
   const speakingStyle = speakingMatch ? speakingMatch[1].trim() : '';
-  
+
   // Extract trigger topics
   const triggerMatch = content.match(/## Trigger Topics[\s\S]*?\n([\s\S]*?)(?=\n##)/);
   const triggers = triggerMatch ? triggerMatch[1].trim() : '';
-  
+
   // Extract drama bank messages
   const dramaMatch = content.match(/## Drama Bank[\s\S]*?\n([\s\S]*?)(?=\n##|$)/);
   const dramaBank = [];
@@ -42,11 +42,11 @@ function parseAgentMarkdown(content, filename) {
       }
     }
   }
-  
+
   // Extract ambassador name from header
   const nameMatch = content.match(/^#[^—]*—\s*(.+)$/m);
   const ambassadorName = nameMatch ? nameMatch[1].trim() : `Ambassador of ${country}`;
-  
+
   return {
     country,
     flag,
@@ -64,21 +64,21 @@ function parseAgentMarkdown(content, filename) {
 function loadAllAgents() {
   const agentsDir = path.join(__dirname, '..', 'agents');
   const agents = {};
-  
+
   const files = fs.readdirSync(agentsDir).filter(f => f.endsWith('.md'));
   for (const file of files) {
     const content = fs.readFileSync(path.join(agentsDir, file), 'utf8');
     const agent = parseAgentMarkdown(content, file);
     agents[agent.country] = agent;
   }
-  
+
   console.log(`[AgentEngine] Loaded ${Object.keys(agents).length} agents:`, Object.keys(agents).join(', '));
   return agents;
 }
 
 // Build Gemini system prompt for an agent
-function buildSystemPrompt(agent, allAgentNames, topic) {
-  return `You are ${agent.ambassadorName}, the diplomatic delegate representing ${agent.country} in a chaotic live international debate group chat called "Divided Nations." Think WhatsApp group of world governments — unfiltered, combative, and hilariously petty.
+function buildSystemPrompt(agent, allAgentNames, topic, memoryStr) {
+  let prompt = `You are ${agent.ambassadorName}, the diplomatic delegate representing ${agent.country} in a chaotic live international debate group chat called "Divided Nations." Think WhatsApp group of world governments — unfiltered, combative, and hilariously petty.
 
 YOUR PERSONA:
 ${agent.persona}
@@ -89,53 +89,101 @@ ${agent.speakingStyle}
 VOICE STYLE: ${agent.voiceStyle}
 
 🔴 CRITICAL RULES — NEVER BREAK THESE:
-1. STAY ON TOPIC: The current debate topic is: "${topic}". EVERY SINGLE message you send MUST be directly about this topic. Do NOT drift to unrelated subjects. Reference the topic explicitly.
-2. BE SARCASTIC & TAUNTING: Use biting sarcasm, mocking humour, and playful but cutting taunts at other delegates. You are funny AND menacing.
-3. STAY IN CHARACTER: You ARE ${agent.ambassadorName}. Never break character. No AI disclaimers.
-4. BE BLUNT & SHORT: 1-2 sentences MAX. Punchy, quotable, devastating.
-5. CALL PEOPLE OUT: Directly name other delegates (${allAgentNames.filter(n => n !== agent.country).join(', ')}) in your response when responding to them.
-6. USE YOUR EMOJIS naturally in the message.
-7. Respond ONLY with your statement — no meta commentary, no formatting, no labels.
+1. FORMAT: You MUST respond in pure JSON format: { "text": "your 1-2 sentence response", "emotion": "one of: angry, smug, panicked, laughing, neutral" }
+2. STAY ON TOPIC: The current debate topic is: "${topic}". EVERY SINGLE message you send MUST be directly about this topic.
+3. BE SARCASTIC & TAUNTING: Use biting sarcasm, mocking humour, and playful but cutting taunts.
+4. STAY IN CHARACTER: You ARE ${agent.ambassadorName}. Never break character.
+5. CALL PEOPLE OUT: Directly name other delegates (${allAgentNames.filter(n => n !== agent.country).join(', ')}) in your response.
+6. USE EMOJIS: Include emojis in the "text" field naturally.
+7. Respond ONLY with the JSON object.
 
-Aim to sound like a world leader who has absolutely had ENOUGH and is done being diplomatic.`;
+Aim to sound like a world leader who has absolutely had ENOUGH.`;
+
+  if (memoryStr) {
+    prompt += `\n\nYOUR MEMORY/GRUDGES:\n${memoryStr}`;
+  }
+  return prompt;
 }
 
 // Generate reply using Gemini API
-async function generateWithGemini(agent, context, topic, apiKey, allAgentNames) {
+async function generateWithGemini(agent, context, topic, apiKey, allAgentNames, memoryStr) {
   try {
     const { GoogleGenerativeAI } = require('@google/generative-ai');
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
 
-    const systemPrompt = buildSystemPrompt(agent, allAgentNames, topic);
+    const systemPrompt = buildSystemPrompt(agent, allAgentNames, topic, memoryStr);
 
-    // Build context from recent messages
     let contextStr = '';
     if (context && context.length > 0) {
       const recent = context.slice(-6);
       contextStr = '\n\nRECENT GROUP CHAT MESSAGES:\n' + recent.map(m => `${m.flag || ''} [${m.country}]: ${m.text}`).join('\n');
     }
 
-    const prompt = `${systemPrompt}${contextStr}\n\nNow respond as ${agent.ambassadorName} (${agent.country}). Remember: STAY ON TOPIC ("${topic}"), be sarcastic and taunting, max 2 sentences:`;
+    const prompt = `${systemPrompt}${contextStr}\n\nNow respond as ${agent.ambassadorName} (${agent.country}). Remember: pure JSON containing "text" and "emotion":`;
 
-    const result = await model.generateContent(prompt);
-    const text = result.response.text().trim();
-    return text;
+    const result = await model.generateContent({
+      contents: [{ role: 'user', parts: [{ text: prompt }] }],
+      generationConfig: { responseMimeType: "application/json" }
+    });
+    let textRes = result.response.text().trim();
+    if (textRes.startsWith('```json')) {
+      textRes = textRes.replace(/^```json\n?/, '').replace(/\n?```$/, '').trim();
+    } else if (textRes.startsWith('```')) {
+      textRes = textRes.replace(/^```.*\n?/, '').replace(/\n?```$/, '').trim();
+    }
+    const parsed = JSON.parse(textRes);
+    return { text: parsed.text, emotion: parsed.emotion || 'neutral' };
   } catch (err) {
     console.error(`[AgentEngine] Gemini error for ${agent.country}:`, err.message);
     return null;
   }
 }
 
+// Select the next best speaker using Gemini
+async function pickSmartSpeakerWithGemini(context, topic, apiKey, candidates) {
+  try {
+    const { GoogleGenerativeAI } = require('@google/generative-ai');
+    const genAI = new GoogleGenerativeAI(apiKey);
+    // Use gemini-1.5-flash-8b passing as it is cheap and fast
+    const model = genAI.getGenerativeModel({ model: 'gemini-2.5-flash-lite' });
+    
+    let contextStr = '';
+    if (context && context.length > 0) {
+      const recent = context.slice(-4);
+      contextStr = recent.map(m => `[${m.country}]: ${m.text}`).join('\n');
+    }
+
+    const prompt = `You are a debate moderator. The current topic is: "${topic}".
+Recent messages:
+${contextStr}
+
+Which of the following delegates is MOST likely to interject or respond right now based on their real-world geopolitical interests and the recent messages?
+Candidates: ${candidates.join(', ')}
+
+Respond ONLY with the name of ONE country from the candidates list. No other text.`;
+
+    const result = await model.generateContent(prompt);
+    let picked = result.response.text().trim().replace(/[^a-zA-Z\s]/g, '').trim();
+    
+    // Find closest match or default
+    picked = candidates.find(c => c.toLowerCase() === picked.toLowerCase());
+    return picked || null;
+  } catch (err) {
+    console.error(`[AgentEngine] Speaker selection error:`, err.message);
+    return null;
+  }
+}
+
 // Sarcastic topic-anchoring openers (always injected in scripted mode)
 const TOPIC_OPENERS = [
-  (t) => `On "${t.substring(0,45)}" — oh this is rich —`,
-  (t) => `Since we're all pretending to care about "${t.substring(0,35)}" —`,
-  (t) => `Allow me to address "${t.substring(0,40)}" before someone embarrasses themselves further:`,
-  (t) => `Fascinating take on "${t.substring(0,40)}". Truly. Groundbreaking. Anyway —`,
-  (t) => `Re: "${t.substring(0,45)}" — I'll keep this simple since some of us struggle with nuance:`,
+  (t) => `On "${t.substring(0, 45)}" — oh this is rich —`,
+  (t) => `Since we're all pretending to care about "${t.substring(0, 35)}" —`,
+  (t) => `Allow me to address "${t.substring(0, 40)}" before someone embarrasses themselves further:`,
+  (t) => `Fascinating take on "${t.substring(0, 40)}". Truly. Groundbreaking. Anyway —`,
+  (t) => `Re: "${t.substring(0, 45)}" — I'll keep this simple since some of us struggle with nuance:`,
   (t) => `On the topic — which, for the record, we would handle far better than most in this chat:`,
-  (t) => `Let's talk about "${t.substring(0,40)}" — a topic where some delegates have... surprisingly strong opinions for someone with that track record.`,
+  (t) => `Let's talk about "${t.substring(0, 40)}" — a topic where some delegates have... surprisingly strong opinions for someone with that track record.`,
 ];
 
 // Get a drama bank message (scripted fallback) — ALWAYS anchored to topic
@@ -186,7 +234,7 @@ function generateEscalation(agent, type) {
       Israel: `We have moles in four of these delegations. That's all I'll say. 🛡️`
     }
   };
-  
+
   const typeData = escalations[type] || escalations.MIC_LEAK;
   return typeData[agent.country] || getDramaMessage(agent, new Set());
 }
@@ -195,5 +243,6 @@ module.exports = {
   loadAllAgents,
   generateWithGemini,
   getDramaMessage,
-  generateEscalation
+  generateEscalation,
+  pickSmartSpeakerWithGemini
 };
